@@ -47,6 +47,8 @@ typedef struct packet_s {
     char data[MAX_DATA_SIZE];
 } PCKT;
 
+void PCKT_print(PCKT const* pckt);
+
 /* PCKT_WND interface */
 
 #define PCKT_WND_SIZE 2
@@ -101,6 +103,15 @@ int main(int argc, char* argv[]);
 
 /* DEFINITIONS */
 
+void PCKT_print(PCKT const* pckt) {
+    int bytes;
+    printf("Packet #%d with %d bytes:\n", pckt->id, pckt->data_size);
+    printf("'");
+    for (bytes = 0; bytes < pckt->data_size; bytes++)
+       printf("%c", pckt->data[bytes]);
+    printf("'\n");
+}
+
 OPSTAT PCKT_WND_load() {
     pckt_cnt = 0;
     int bytes_read_now = 0;
@@ -125,8 +136,10 @@ OPSTAT PCKT_WND_send() {
     fwrite(&pckt_cnt, sizeof(int), 1, net);
     int i;
     for (i = 0; i < pckt_cnt; i++) {
-        if (!NET_send_packet(&pckt_wnd[i]))
+        if (!NET_send_packet(&pckt_wnd[i])) {
+            error = PCKT_WND_SEND_ERR;
             return FAIL;
+        }
     }
     return SUCCESS;
 }
@@ -137,21 +150,23 @@ OPSTAT PCKT_WND_recv() {
         return FAIL;
     int i;
     for (i = 0; i < pckt_cnt; i++) {
-        if (!NET_recv_packet(&pckt_wnd[i]))
+        if (!NET_recv_packet(&pckt_wnd[i])) {
+            error = PCKT_WND_RECV_ERR;
             return FAIL;
+        }
     }
     return SUCCESS;
 }
 
 OPSTAT PCKT_WND_save() {
-    int i, bytes;
-    printf("Packet cnt: %d\n", pckt_cnt);
+    int i, bytes_read_now;
     for (i = 0; i < pckt_cnt; i++) {
-        printf("Packet #%d with %d bytes:\n", i, pckt_wnd[i].data_size);
-        printf("'");
-        for (bytes = 0; bytes < pckt_wnd[i].data_size; bytes++)
-            printf("%c", pckt_wnd[i].data[bytes]);
-        printf("'\n");
+        PCKT* pckt = &pckt_wnd[i];
+        bytes_read_now = fwrite(&pckt->data, sizeof(*(pckt->data)), pckt->data_size, file);
+        if (bytes_read_now != pckt->data_size) {
+            error = PCKT_WND_SAVE_ERR;
+            return FAIL;
+        }
     }
     return SUCCESS;
 }
@@ -206,7 +221,7 @@ OPSTAT CTX_init(int argc, char* argv[]) {
         case NUM_SRV_ARGS:
             app_mode = SRV_MODE;
             net = fopen("bin/net", "r");
-            return FILE_open(argv[SRV_ARG_FILE], "a")
+            return FILE_open(argv[SRV_ARG_FILE], "w")
                    && NET_bind(argv[SRV_ARG_PORT]);
         default: 
             error = APP_NUM_ARGS_ERR;
