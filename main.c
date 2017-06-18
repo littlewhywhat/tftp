@@ -62,7 +62,7 @@ OPSTAT NET_bind(char const* port);
 void NET_clean();
 
 void NET_recv_packet(PCKT* packet);
-void NET_send_packet(PCKT const* packet);
+OPSTAT NET_send_packet(PCKT const* packet);
 
 void NET_recv_ack(int* packet_id);
 void NET_send_ack(int packet_id);
@@ -117,7 +117,11 @@ OPSTAT PCKT_WND_load() {
 
 OPSTAT PCKT_WND_send() {
     SRV_pckt_cnt = CLT_pckt_cnt;
-    memcpy(SRV_pckt_wnd, CLT_pckt_wnd, sizeof(CLT_pckt_wnd));
+    int i;
+    for (i = 0; i < CLT_pckt_cnt; i++) {
+        if (!NET_send_packet(&CLT_pckt_wnd[i]))
+            return FAIL;
+    }
     return SUCCESS;
 }
 
@@ -145,6 +149,11 @@ OPSTAT NET_connect(char const* host, char const* port) {
 OPSTAT NET_bind(char const* port) {
     error = NET_BIND_ERR;
     return FAIL;
+}
+
+OPSTAT NET_send_packet(PCKT const* packet) {
+    memcpy(&SRV_pckt_wnd[packet->id], packet, sizeof(*packet));
+    return SUCCESS;
 }
 
 void NET_clean() {}
