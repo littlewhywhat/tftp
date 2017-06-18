@@ -168,7 +168,7 @@ void FILE_clean() {
 OPSTAT CTX_init(int argc, char* argv[]) {
     switch (argc) {
         case NUM_CLT_ARGS:
-            return FILE_open(argv[CLT_ARG_FILE], "rw") 
+            return FILE_open(argv[CLT_ARG_FILE], "r") 
                    && NET_connect(argv[CLT_ARG_HOST], argv[CLT_ARG_PORT]);
         case NUM_SRV_ARGS:
             return FILE_open(argv[SRV_ARG_FILE], "a")
