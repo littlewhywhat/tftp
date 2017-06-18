@@ -4,6 +4,12 @@
 #include <time.h>
 #include <stdlib.h>
 
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <errno.h>
+
 typedef enum app_mode_e {
     CLT_MODE,
     SRV_MODE,
@@ -30,6 +36,7 @@ OPSTAT RND_opt_stat() {
 
 typedef enum error_e {
     NO_ERR,
+    NET_ACCPT_ERR,
     NET_CONN_ERR,
     NET_BIND_ERR,
     FILE_OPEN_ERR,
@@ -71,9 +78,19 @@ OPSTAT PCKT_send();
 /* NET */
 
 FILE* net = NULL;
+int sock = -1;
+
+OPSTAT NET_put_tries(struct addrinfo** tries, char const* host, char const* port);
+OPSTAT NET_getnameinfo(struct sockaddr const* addr, socklen_t const* len,
+                       char* host, int hsize, char* serv, int ssize);
 
 OPSTAT NET_connect(char const* host, char const* port);
 OPSTAT NET_bind(char const* port);
+OPSTAT NET_accept();
+
+OPSTAT NET_send_bytes(char* bytes, size_t cnt);
+OPSTAT NET_recv_bytes(char* bytes, size_t cnt);
+
 void NET_clean();
 
 OPSTAT NET_recv_packet(PCKT* packet);
@@ -171,27 +188,17 @@ OPSTAT PCKT_save() {
     return SUCCESS;
 }
 
-OPSTAT NET_connect(char const* host, char const* port) {
-    RND_init();
-    net = fopen("bin/net", "w");
-    if (!net) {
-        error = NET_CONN_ERR;
-        return FAIL;        
-    }
-    return SUCCESS;   
-}
-
-OPSTAT NET_bind(char const* port) {
-    net = fopen("bin/net", "r");
-    if (!net) {
-        error = NET_BIND_ERR;
-        return FAIL;
-    }
-    return SUCCESS;
-}
+// OPSTAT NET_bind(char const* port) {
+//     net = fopen("bin/net", "r");
+//     if (!net) {
+//         error = NET_BIND_ERR;
+//         return FAIL;
+//     }
+//     return SUCCESS;
+// }
 
 OPSTAT NET_send_packet(PCKT const* packet) {
-    if (!fwrite(packet, sizeof(*packet), 1, net)) {
+    if (!NET_send_bytes((char*)packet, sizeof(*packet))) {
         error = NET_CONN_ERR;
         return FAIL;
     }
@@ -199,7 +206,7 @@ OPSTAT NET_send_packet(PCKT const* packet) {
 }
 
 OPSTAT NET_recv_packet(PCKT* packet) {
-    if (!fread(packet, sizeof(*packet), 1, net)) {
+    if (!NET_recv_bytes((char*)packet, sizeof(*packet))) {
         error = NET_CONN_ERR;
         return FAIL;        
     }
@@ -223,11 +230,138 @@ OPSTAT NET_send_ack(int packet_id) {
     return SUCCESS;
 }
 
+OPSTAT NET_send_bytes(char* bytes, size_t cnt) {
+    size_t bytes_sent = 0, bytes_sent_now;
+    while (bytes_sent != cnt) {
+        do {
+           bytes_sent_now = write(sock, bytes + bytes_sent, cnt - bytes_sent);
+        } while (bytes_sent_now == -1 && errno == EINTR);
+        if (bytes_sent_now == -1)
+            return FAIL;
+        bytes_sent += bytes_sent_now;
+    }
+    return SUCCESS;
+}
+
+OPSTAT NET_recv_bytes(char* bytes, size_t cnt) {
+    size_t bytes_read = 0, bytes_read_now;
+    while (bytes_read != cnt) {
+        do {
+            bytes_read_now = read(sock, bytes + bytes_read, cnt - bytes_read);
+        } while ((bytes_read_now == -1) && (errno == EINTR));
+        if (bytes_read_now == -1)
+            return FAIL;
+        bytes_read += bytes_read_now;
+    }
+    return SUCCESS;
+}
+
+OPSTAT NET_put_tries(struct addrinfo** tries, char const* host, char const* port) {
+    struct addrinfo hints;
+
+    memset(&hints, 0, sizeof(struct addrinfo));
+
+    hints.ai_socktype = SOCK_DGRAM;  
+    hints.ai_flags = AI_PASSIVE;
+    hints.ai_protocol = IPPROTO_UDP;
+
+    if (getaddrinfo(host, port, &hints, tries) != 0)
+        return FAIL;
+    return SUCCESS;
+}
+
+OPSTAT NET_getnameinfo(struct sockaddr const* addr, socklen_t const* len,
+                       char* host, int hsize, char* serv, int ssize) {
+    if (getnameinfo(addr, *len, host, hsize, serv, ssize, NI_NUMERICHOST) != 0)
+        return FAIL;
+    return SUCCESS;
+}
+
+OPSTAT NET_connect(char const* host, char const* port) {
+    struct addrinfo* tries = NULL,* try;
+    char host_info[NI_MAXHOST];
+  
+    if (!NET_put_tries(&tries, host, port)) {
+        error = NET_CONN_ERR;
+        return FAIL;
+    }
+    for (try = tries; try != NULL; try = try->ai_next) {
+        sock = socket(try->ai_family, try->ai_socktype, try->ai_protocol);
+        if (sock == -1)
+            continue;
+        if (connect(sock, try->ai_addr, try->ai_addrlen) != -1)
+            break;                  
+        close(sock);
+    }
+    if (!try || !NET_getnameinfo(try->ai_addr, &try->ai_addrlen, host_info, sizeof(host_info), NULL, 0)) {
+        error = NET_CONN_ERR;
+        return FAIL;
+    }
+    printf("Connected to %s\n", host_info);
+    freeaddrinfo(tries);
+
+    RND_init();
+    net = fopen("bin/net", "w");
+    if (!net) {
+        error = NET_CONN_ERR;
+        return FAIL;        
+    }
+    return SUCCESS;
+}
+
+OPSTAT NET_accept() {
+    int backlog = 3;
+    
+    if (listen(sock, backlog) == -1) {
+        error = NET_ACCPT_ERR;
+        return FAIL;
+    }
+    struct sockaddr client;
+    socklen_t size = sizeof(client);
+
+    sock = accept(sock, &client, &size);
+    
+    char host[NI_MAXHOST], serv[NI_MAXSERV];
+    
+    if (sock == -1 || !NET_getnameinfo(&client, &size, host, sizeof(host), serv, sizeof(serv))) {
+        return FAIL;
+    }
+    printf("Server: connect from host %s, port %s.\n", host, serv);
+    return SUCCESS;
+}
+
+OPSTAT NET_bind(char const* port) {
+    struct addrinfo* tries = NULL, * try;
+  
+    if (!NET_put_tries(&tries, NULL, port)) {
+        error = NET_BIND_ERR;
+        return FAIL;
+    }
+
+    for (try = tries; try != NULL; try = try->ai_next) {
+        sock = socket(try->ai_family, try->ai_socktype, try->ai_protocol);
+        if (sock == -1)
+            continue;
+        if (bind(sock, try->ai_addr, try->ai_addrlen) == 0) {
+            printf("Bound to port %s\n", port);
+            break;                  
+        }
+        close(sock);
+    }
+    if (try == NULL) {
+        error = NET_BIND_ERR;
+        return FAIL;
+    }
+    freeaddrinfo(tries);
+    return SUCCESS;
+}
+
 void NET_clean() {
     if (net) {
         fclose(net);
         net = NULL;
     }
+    close(sock);
 }
 
 OPSTAT FILE_open(char const* filename, char const* mode) {
@@ -273,6 +407,9 @@ void CTX_print() {
         case NET_BIND_ERR:
             printf("Failed to bind");
             break;
+        case NET_ACCPT_ERR: 
+            printf("Failed to accept");
+            break;
         case FILE_OPEN_ERR:
             printf("Failed to open file");
             break;
@@ -290,9 +427,6 @@ void CTX_print() {
             break;
         case APP_NUM_ARGS_ERR:
             printf("Wrong number of arguments");
-            break;
-        default: 
-            assert(0);
             break;
     }
     printf("\n");
