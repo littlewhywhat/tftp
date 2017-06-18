@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
+#include <time.h>
+#include <stdlib.h>
 
 typedef enum app_mode_e {
     CLT_MODE,
@@ -13,6 +15,16 @@ typedef enum opstat_e {
     FAIL = 0,
     SUCCESS = 1
 } OPSTAT;
+
+/* RND */
+
+void RND_init() {
+    srand(time(NULL));
+}
+
+OPSTAT RND_opt_stat() {
+    return rand() % 2;
+}
 
 /* ERR */
 
@@ -67,8 +79,8 @@ void NET_clean();
 OPSTAT NET_recv_packet(PCKT* packet);
 OPSTAT NET_send_packet(PCKT const* packet);
 
-void NET_recv_ack(int* packet_id);
-void NET_send_ack(int packet_id);
+OPSTAT NET_recv_ack(int* packet_id);
+OPSTAT NET_send_ack(int packet_id);
 
 /* CTX */
 
@@ -123,7 +135,11 @@ OPSTAT PCKT_load() {
 }
 
 OPSTAT PCKT_send() {
-    if (!NET_send_packet(&pckt_buff)) {
+    int ack_id;
+    while (NET_send_packet(&pckt_buff)
+             && NET_recv_ack(&ack_id)
+             && ack_id != pckt_buff.id);
+    if (error == NET_CONN_ERR) {
         error = PCKT_SEND_ERR;
         return FAIL;
     }
@@ -131,9 +147,13 @@ OPSTAT PCKT_send() {
 }
 
 OPSTAT PCKT_recv() {
-    if (pckt_cnt != 0 && pckt_buff.data_size < MAX_DATA_SIZE)
+    if (pckt_cnt > 0 && pckt_buff.data_size < MAX_DATA_SIZE)
         return FAIL;
-    if (!NET_recv_packet(&pckt_buff)) {
+    while (NET_recv_packet(&pckt_buff)
+             && pckt_cnt != pckt_buff.id
+             && NET_send_ack(pckt_buff.id));
+    if (error == NET_CONN_ERR 
+        || !NET_send_ack(pckt_cnt)) {
         error = PCKT_RECV_ERR;
         return FAIL;
     }
@@ -152,6 +172,7 @@ OPSTAT PCKT_save() {
 }
 
 OPSTAT NET_connect(char const* host, char const* port) {
+    RND_init();
     net = fopen("bin/net", "w");
     if (!net) {
         error = NET_CONN_ERR;
@@ -170,12 +191,35 @@ OPSTAT NET_bind(char const* port) {
 }
 
 OPSTAT NET_send_packet(PCKT const* packet) {
-    fwrite(packet, sizeof(*packet), 1, net);
+    if (!fwrite(packet, sizeof(*packet), 1, net)) {
+        error = NET_CONN_ERR;
+        return FAIL;
+    }
     return SUCCESS;
 }
 
 OPSTAT NET_recv_packet(PCKT* packet) {
-    fread(packet, sizeof(*packet), 1, net);
+    if (!fread(packet, sizeof(*packet), 1, net)) {
+        error = NET_CONN_ERR;
+        return FAIL;        
+    }
+    PCKT_print(packet);
+    return SUCCESS;
+}
+
+OPSTAT NET_recv_ack(int* packet_id) {
+    // if (!fread(packet_id, sizeof(*packet_id), 1, net)) {
+    //     error = NET_CONN_ERR;
+    //     return FAIL;
+    // }
+    return RND_opt_stat();
+}
+
+OPSTAT NET_send_ack(int packet_id) {
+    // if (!fwrite(&packet_id, sizeof(packet_id), 1, net)) {
+    //     error = NET_CONN_ERR;
+    //     return FAIL;        
+    // }
     return SUCCESS;
 }
 
