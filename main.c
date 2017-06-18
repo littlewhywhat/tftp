@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 
 typedef enum opstat_e {
     FAIL = 0,
@@ -43,8 +44,11 @@ typedef struct packet_s {
 
 #define PCKT_WND_SIZE 2
 
-int pckt_cnt = 0;
-PCKT pckt_wnd[PCKT_WND_SIZE];
+int SRV_pckt_cnt = 0;
+PCKT SRV_pckt_wnd[PCKT_WND_SIZE];
+
+int CLT_pckt_cnt = 0;
+PCKT CLT_pckt_wnd[PCKT_WND_SIZE];
 
 OPSTAT PCKT_WND_load();
 OPSTAT PCKT_WND_save();
@@ -92,19 +96,19 @@ int main(int argc, char* argv[]);
 /* DEFINITIONS */
 
 OPSTAT PCKT_WND_load() {
-    pckt_cnt = 0;
+    CLT_pckt_cnt = 0;
     int bytes_read_now = 0;
     if (feof(file))
         return FAIL;
     do {
-        PCKT* pckt = &pckt_wnd[pckt_cnt];
+        PCKT* pckt = &CLT_pckt_wnd[CLT_pckt_cnt];
         bytes_read_now = fread(&pckt->data, sizeof(*(pckt->data)), MAX_DATA_SIZE, file);
         pckt->data_size = bytes_read_now;
-        pckt->id = pckt_cnt;
-        pckt_cnt++;
-    } while (pckt_cnt < PCKT_WND_SIZE 
+        pckt->id = CLT_pckt_cnt;
+        CLT_pckt_cnt++;
+    } while (CLT_pckt_cnt < PCKT_WND_SIZE 
            && bytes_read_now == MAX_DATA_SIZE);
-    if ((pckt_cnt == PCKT_WND_SIZE && bytes_read_now == MAX_DATA_SIZE)
+    if ((CLT_pckt_cnt == PCKT_WND_SIZE && bytes_read_now == MAX_DATA_SIZE)
         || feof(file))
         return SUCCESS;
     error = PCKT_WND_LOAD_ERR;
@@ -112,6 +116,8 @@ OPSTAT PCKT_WND_load() {
 }
 
 OPSTAT PCKT_WND_send() {
+    SRV_pckt_cnt = CLT_pckt_cnt;
+    memcpy(SRV_pckt_wnd, CLT_pckt_wnd, sizeof(CLT_pckt_wnd));
     return SUCCESS;
 }
 
@@ -121,12 +127,12 @@ OPSTAT PCKT_WND_recv() {
 
 OPSTAT PCKT_WND_save() {
     int i, bytes;
-    printf("Packet cnt: %d\n", pckt_cnt);
-    for (i = 0; i < pckt_cnt; i++) {
-        printf("Packet #%d with %d bytes:\n", i, pckt_wnd[i].data_size);
+    printf("Packet cnt: %d\n", SRV_pckt_cnt);
+    for (i = 0; i < SRV_pckt_cnt; i++) {
+        printf("Packet #%d with %d bytes:\n", i, SRV_pckt_wnd[i].data_size);
         printf("'");
-        for (bytes = 0; bytes < pckt_wnd[i].data_size; bytes++)
-            printf("%c", pckt_wnd[i].data[bytes]);
+        for (bytes = 0; bytes < SRV_pckt_wnd[i].data_size; bytes++)
+            printf("%c", SRV_pckt_wnd[i].data[bytes]);
         printf("'\n");
     }
     return SUCCESS;
