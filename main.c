@@ -173,11 +173,19 @@ OPSTAT PCKT_WND_save() {
 
 OPSTAT NET_connect(char const* host, char const* port) {
     net = fopen("bin/net", "w");
+    if (!net) {
+        error = NET_CONN_ERR;
+        return FAIL;        
+    }
     return SUCCESS;   
 }
 
 OPSTAT NET_bind(char const* port) {
     net = fopen("bin/net", "r");
+    if (!net) {
+        error = NET_BIND_ERR;
+        return FAIL;
+    }
     return SUCCESS;
 }
 
