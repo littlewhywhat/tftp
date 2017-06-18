@@ -63,7 +63,7 @@ OPSTAT PCKT_WND_send();
 
 /* NET */
 
-FILE* net;
+FILE* net = NULL;
 
 OPSTAT NET_connect(char const* host, char const* port);
 OPSTAT NET_bind(char const* port);
@@ -172,10 +172,12 @@ OPSTAT PCKT_WND_save() {
 }
 
 OPSTAT NET_connect(char const* host, char const* port) {
+    net = fopen("bin/net", "w");
     return SUCCESS;   
 }
 
 OPSTAT NET_bind(char const* port) {
+    net = fopen("bin/net", "r");
     return SUCCESS;
 }
 
@@ -189,7 +191,12 @@ OPSTAT NET_recv_packet(PCKT* packet) {
     return SUCCESS;
 }
 
-void NET_clean() {}
+void NET_clean() {
+    if (net) {
+        fclose(net);
+        net = NULL;
+    }
+}
 
 OPSTAT FILE_open(char const* filename, char const* mode) {
     file = fopen(filename, mode);
@@ -205,22 +212,16 @@ void FILE_clean() {
         fclose(file);
         file = NULL;
     }
-    if (net) {
-        fclose(net);
-        net = NULL;
-    }
 }
 
 OPSTAT CTX_init(int argc, char* argv[]) {
     switch (argc) {
         case NUM_CLT_ARGS:
             app_mode = CLT_MODE;
-            net = fopen("bin/net", "w");
             return FILE_open(argv[CLT_ARG_FILE], "r") 
                    && NET_connect(argv[CLT_ARG_HOST], argv[CLT_ARG_PORT]);
         case NUM_SRV_ARGS:
             app_mode = SRV_MODE;
-            net = fopen("bin/net", "r");
             return FILE_open(argv[SRV_ARG_FILE], "w")
                    && NET_bind(argv[SRV_ARG_PORT]);
         default: 
