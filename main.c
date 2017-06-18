@@ -2,6 +2,13 @@
 #include <assert.h>
 #include <string.h>
 
+typedef enum app_mode_e {
+    CLT_MODE,
+    SRV_MODE,
+} APP_MODE;
+
+APP_MODE app_mode;
+
 typedef enum opstat_e {
     FAIL = 0,
     SUCCESS = 1
@@ -57,11 +64,13 @@ OPSTAT PCKT_WND_send();
 
 /* NET */
 
+FILE* net;
+
 OPSTAT NET_connect(char const* host, char const* port);
 OPSTAT NET_bind(char const* port);
 void NET_clean();
 
-void NET_recv_packet(PCKT* packet);
+OPSTAT NET_recv_packet(PCKT* packet);
 OPSTAT NET_send_packet(PCKT const* packet);
 
 void NET_recv_ack(int* packet_id);
@@ -116,7 +125,7 @@ OPSTAT PCKT_WND_load() {
 }
 
 OPSTAT PCKT_WND_send() {
-    SRV_pckt_cnt = CLT_pckt_cnt;
+    fwrite(&CLT_pckt_cnt, sizeof(int), 1, net);
     int i;
     for (i = 0; i < CLT_pckt_cnt; i++) {
         if (!NET_send_packet(&CLT_pckt_wnd[i]))
@@ -126,6 +135,14 @@ OPSTAT PCKT_WND_send() {
 }
 
 OPSTAT PCKT_WND_recv() {
+    fread(&SRV_pckt_cnt, sizeof(int), 1, net);
+    if (feof(net))
+        return FAIL;
+    int i;
+    for (i = 0; i < SRV_pckt_cnt; i++) {
+        if (!NET_recv_packet(&SRV_pckt_wnd[i]))
+            return FAIL;
+    }
     return SUCCESS;
 }
 
@@ -147,12 +164,16 @@ OPSTAT NET_connect(char const* host, char const* port) {
 }
 
 OPSTAT NET_bind(char const* port) {
-    error = NET_BIND_ERR;
-    return FAIL;
+    return SUCCESS;
 }
 
 OPSTAT NET_send_packet(PCKT const* packet) {
-    memcpy(&SRV_pckt_wnd[packet->id], packet, sizeof(*packet));
+    fwrite(packet, sizeof(*packet), 1, net);
+    return SUCCESS;
+}
+
+OPSTAT NET_recv_packet(PCKT* packet) {
+    fread(packet, sizeof(*packet), 1, net);
     return SUCCESS;
 }
 
@@ -168,18 +189,26 @@ OPSTAT FILE_open(char const* filename, char const* mode) {
 }
 
 void FILE_clean() {
-    if (!file)
-        return;
-    fclose(file);
-    file = NULL;
+    if (file) {
+        fclose(file);
+        file = NULL;
+    }
+    if (net) {
+        fclose(net);
+        net = NULL;
+    }
 }
 
 OPSTAT CTX_init(int argc, char* argv[]) {
     switch (argc) {
         case NUM_CLT_ARGS:
+            app_mode = CLT_MODE;
+            net = fopen("bin/net", "w");
             return FILE_open(argv[CLT_ARG_FILE], "r") 
                    && NET_connect(argv[CLT_ARG_HOST], argv[CLT_ARG_PORT]);
         case NUM_SRV_ARGS:
+            app_mode = SRV_MODE;
+            net = fopen("bin/net", "r");
             return FILE_open(argv[SRV_ARG_FILE], "a")
                    && NET_bind(argv[SRV_ARG_PORT]);
         default: 
@@ -230,11 +259,23 @@ void CTX_clean() {
 
 int main(int argc, char* argv[]) {
     if (CTX_init(argc, argv)) {
-        while (PCKT_WND_load()
-               && PCKT_WND_send()
-               && PCKT_WND_recv()
-               && PCKT_WND_save())
-            pckt_window_cnt++;
+        switch (app_mode) {
+            case CLT_MODE:
+                while (PCKT_WND_load()
+                       && PCKT_WND_send()) {
+                    pckt_window_cnt++;
+                }
+                break;
+            case SRV_MODE:
+                while (PCKT_WND_recv()
+                       && PCKT_WND_save()) {
+                    pckt_window_cnt++;
+                }
+                break;
+            default:
+                assert(0);
+                break;
+        }
         printf("Processed %d packet windows\n", pckt_window_cnt);
     }
     CTX_print();
