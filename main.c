@@ -21,10 +21,10 @@ typedef enum error_e {
     NET_CONN_ERR,
     NET_BIND_ERR,
     FILE_OPEN_ERR,
-    PCKT_WND_LOAD_ERR,
-    PCKT_WND_SAVE_ERR,
-    PCKT_WND_SEND_ERR,
-    PCKT_WND_RECV_ERR,
+    PCKT_LOAD_ERR,
+    PCKT_SAVE_ERR,
+    PCKT_SEND_ERR,
+    PCKT_RECV_ERR,
     APP_NUM_ARGS_ERR,
 } ERR;
 
@@ -47,19 +47,14 @@ typedef struct packet_s {
     char data[MAX_DATA_SIZE];
 } PCKT;
 
+int pckt_cnt = 0;
+PCKT pckt_buff;
 void PCKT_print(PCKT const* pckt);
 
-/* PCKT_WND interface */
-
-#define PCKT_WND_SIZE 2
-
-int pckt_cnt = 0;
-PCKT pckt_wnd[PCKT_WND_SIZE];
-
-OPSTAT PCKT_WND_load();
-OPSTAT PCKT_WND_save();
-OPSTAT PCKT_WND_recv();
-OPSTAT PCKT_WND_send();
+OPSTAT PCKT_load();
+OPSTAT PCKT_save();
+OPSTAT PCKT_recv();
+OPSTAT PCKT_send();
 
 /* NET */
 
@@ -112,61 +107,46 @@ void PCKT_print(PCKT const* pckt) {
     printf("'\n");
 }
 
-OPSTAT PCKT_WND_load() {
-    pckt_cnt = 0;
+OPSTAT PCKT_load() {
     int bytes_read_now = 0;
     if (feof(file))
         return FAIL;
-    do {
-        PCKT* pckt = &pckt_wnd[pckt_cnt];
-        bytes_read_now = fread(&pckt->data, sizeof(*(pckt->data)), MAX_DATA_SIZE, file);
-        pckt->data_size = bytes_read_now;
-        pckt->id = pckt_cnt;
-        pckt_cnt++;
-    } while (pckt_cnt < PCKT_WND_SIZE 
-           && bytes_read_now == MAX_DATA_SIZE);
-    if ((pckt_cnt == PCKT_WND_SIZE && bytes_read_now == MAX_DATA_SIZE)
+    bytes_read_now = fread(&pckt_buff.data, sizeof(*(pckt_buff.data)), MAX_DATA_SIZE, file);
+    pckt_buff.data_size = bytes_read_now;
+    pckt_buff.id = pckt_cnt;
+    pckt_cnt++;
+    if (bytes_read_now == MAX_DATA_SIZE
         || feof(file))
         return SUCCESS;
-    error = PCKT_WND_LOAD_ERR;
+    error = PCKT_LOAD_ERR;
     return FAIL;
 }
 
-OPSTAT PCKT_WND_send() {
-    fwrite(&pckt_cnt, sizeof(int), 1, net);
-    int i;
-    for (i = 0; i < pckt_cnt; i++) {
-        if (!NET_send_packet(&pckt_wnd[i])) {
-            error = PCKT_WND_SEND_ERR;
-            return FAIL;
-        }
-    }
-    return SUCCESS;
-}
-
-OPSTAT PCKT_WND_recv() {
-    fread(&pckt_cnt, sizeof(int), 1, net);
-    if (feof(net))
+OPSTAT PCKT_send() {
+    if (!NET_send_packet(&pckt_buff)) {
+        error = PCKT_SEND_ERR;
         return FAIL;
-    int i;
-    for (i = 0; i < pckt_cnt; i++) {
-        if (!NET_recv_packet(&pckt_wnd[i])) {
-            error = PCKT_WND_RECV_ERR;
-            return FAIL;
-        }
     }
     return SUCCESS;
 }
 
-OPSTAT PCKT_WND_save() {
-    int i, bytes_read_now;
-    for (i = 0; i < pckt_cnt; i++) {
-        PCKT* pckt = &pckt_wnd[i];
-        bytes_read_now = fwrite(&pckt->data, sizeof(*(pckt->data)), pckt->data_size, file);
-        if (bytes_read_now != pckt->data_size) {
-            error = PCKT_WND_SAVE_ERR;
-            return FAIL;
-        }
+OPSTAT PCKT_recv() {
+    if (pckt_cnt != 0 && pckt_buff.data_size < MAX_DATA_SIZE)
+        return FAIL;
+    if (!NET_recv_packet(&pckt_buff)) {
+        error = PCKT_RECV_ERR;
+        return FAIL;
+    }
+    pckt_cnt++;
+    return SUCCESS;
+}
+
+OPSTAT PCKT_save() {
+    int bytes_written_now;
+    bytes_written_now = fwrite(&pckt_buff.data, sizeof(*(pckt_buff.data)), pckt_buff.data_size, file);
+    if (bytes_written_now != pckt_buff.data_size) {
+        error = PCKT_SAVE_ERR;
+        return FAIL;
     }
     return SUCCESS;
 }
@@ -252,16 +232,16 @@ void CTX_print() {
         case FILE_OPEN_ERR:
             printf("Failed to open file");
             break;
-        case PCKT_WND_LOAD_ERR:
+        case PCKT_LOAD_ERR:
             printf("Failed to load packet window");
             break;
-        case PCKT_WND_SAVE_ERR:
+        case PCKT_SAVE_ERR:
             printf("Failed to save packet window");
             break;
-        case PCKT_WND_SEND_ERR:
+        case PCKT_SEND_ERR:
             printf("Failed to send packet window");
             break;
-        case PCKT_WND_RECV_ERR:
+        case PCKT_RECV_ERR:
             printf("Failed to receive packet window");
             break;
         case APP_NUM_ARGS_ERR:
@@ -282,14 +262,14 @@ int main(int argc, char* argv[]) {
     if (CTX_init(argc, argv)) {
         switch (app_mode) {
             case CLT_MODE:
-                while (PCKT_WND_load()
-                       && PCKT_WND_send()) {
+                while (PCKT_load()
+                       && PCKT_send()) {
                     pckt_window_cnt++;
                 }
                 break;
             case SRV_MODE:
-                while (PCKT_WND_recv()
-                       && PCKT_WND_save()) {
+                while (PCKT_recv()
+                       && PCKT_save()) {
                     pckt_window_cnt++;
                 }
                 break;
