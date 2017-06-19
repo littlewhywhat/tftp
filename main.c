@@ -156,7 +156,6 @@ OPSTAT PCKT_load() {
     bytes_read_now = fread(&pckt_buff.data, sizeof(*(pckt_buff.data)), MAX_DATA_SIZE, file);
     pckt_buff.data_size = bytes_read_now;
     pckt_buff.id = pckt_cnt;
-    pckt_cnt++;
     if (bytes_read_now == MAX_DATA_SIZE
         || feof(file))
         return SUCCESS;
@@ -167,8 +166,7 @@ OPSTAT PCKT_load() {
 OPSTAT PCKT_send() {
     int ack_id;
     while (NET_send_packet(&pckt_buff)
-             && NET_recv_ack(&ack_id)
-             && ack_id != pckt_buff.id);
+             && !(NET_recv_ack(&ack_id) && ack_id == pckt_buff.id));
     if (error == NET_CONN_ERR) {
         error = PCKT_SEND_ERR;
         return FAIL;
@@ -187,7 +185,6 @@ OPSTAT PCKT_recv() {
         error = PCKT_RECV_ERR;
         return FAIL;
     }
-    pckt_cnt++;
     return SUCCESS;
 }
 
@@ -477,11 +474,13 @@ int main(int argc, char* argv[]) {
         switch (app_mode) {
             case CLT_MODE:
                 while (PCKT_load()
-                       && PCKT_send());
+                       && PCKT_send())
+                    pckt_cnt++;
                 break;
             case SRV_MODE:
                 while (PCKT_recv()
-                       && PCKT_save());
+                       && PCKT_save())
+                    pckt_cnt++;
                 if (peer_info) {
                     printf("Host: %s\n", peer_info->host);
                     printf("Service: %s\n", peer_info->serv);
