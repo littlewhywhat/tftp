@@ -44,11 +44,11 @@ typedef enum error_e {
     NET_ACCPT_ERR,
     NET_CONN_ERR,
     NET_BIND_ERR,
+    NET_OPER_ERR,
+    NET_TIMEOUT_ERR,
     FILE_OPEN_ERR,
     PCKT_LOAD_ERR,
     PCKT_SAVE_ERR,
-    PCKT_SEND_ERR,
-    PCKT_RECV_ERR,
     APP_NUM_ARGS_ERR,
 } ERR;
 
@@ -173,8 +173,8 @@ OPSTAT PCKT_send() {
     while (NET_send_packet(&pckt_buff)
              && NET_recv_ack(&ack_id) 
              && ack_id != pckt_buff.id);
-    if (error == NET_CONN_ERR) {
-        error = PCKT_SEND_ERR;
+    if (error == NET_OPER_ERR
+        || error == NET_TIMEOUT_ERR) {
         return FAIL;
     }
     return SUCCESS;
@@ -186,9 +186,9 @@ OPSTAT PCKT_recv() {
     while (NET_recv_packet(&pckt_buff)
              && pckt_cnt != pckt_buff.id
              && NET_send_ack(pckt_buff.id));
-    if (error == NET_CONN_ERR 
+    if (error == NET_OPER_ERR 
+        || error == NET_TIMEOUT_ERR
         || !NET_send_ack(pckt_cnt)) {
-        error = PCKT_RECV_ERR;
         return FAIL;
     }
     return SUCCESS;
@@ -205,37 +205,24 @@ OPSTAT PCKT_save() {
 }
 
 OPSTAT NET_send_packet(PCKT const* packet) {
-    if (!NET_send_bytes((char*)packet, sizeof(*packet))) {
-        error = NET_CONN_ERR;
-        return FAIL;
-    }
-    return SUCCESS;
+    return !NET_send_bytes((char*)packet, sizeof(*packet));
 }
 
 OPSTAT NET_recv_packet(PCKT* packet) {
-    if (!NET_recv_from((char*)packet, sizeof(*packet))) {
-        error = NET_CONN_ERR;
-        return FAIL;        
-    }
+    OPSTAT stat = NET_recv_from((char*)packet, sizeof(*packet));
     PCKT_print(packet);
-    return SUCCESS;
+    return stat;
 }
 
 OPSTAT NET_recv_ack(int* packet_id) {
-    if (!NET_recv_bytes((char*)packet_id, sizeof(*packet_id))) {
-        error = NET_CONN_ERR;
+    if (!NET_recv_bytes((char*)packet_id, sizeof(*packet_id)))
         return FAIL;
-    }
     *packet_id = RND_int_in(0, *packet_id);
     return SUCCESS;
 }
 
 OPSTAT NET_send_ack(int packet_id) {
-    if (!NET_send_to((char*)&packet_id, sizeof(packet_id))) {
-        error = NET_CONN_ERR;
-        return FAIL;
-    }
-    return SUCCESS;
+    return NET_send_to((char*)&packet_id, sizeof(packet_id));
 }
 
 OPSTAT NET_send_bytes(char* bytes, size_t cnt) {
@@ -244,8 +231,10 @@ OPSTAT NET_send_bytes(char* bytes, size_t cnt) {
         do {
            bytes_sent_now = write(sock, bytes + bytes_sent, cnt - bytes_sent);
         } while (bytes_sent_now == -1 && errno == EINTR);
-        if (bytes_sent_now == -1)
+        if (bytes_sent_now == -1) {
+            error = NET_OPER_ERR;
             return FAIL;
+        }
         bytes_sent += bytes_sent_now;
     }
     return SUCCESS;
@@ -257,8 +246,13 @@ OPSTAT NET_recv_bytes(char* bytes, size_t cnt) {
         do {
             bytes_read_now = read(sock, bytes + bytes_read, cnt - bytes_read);
         } while ((bytes_read_now == -1) && (errno == EINTR));
-        if (bytes_read_now == -1)
+        if (bytes_read_now == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                error = NET_TIMEOUT_ERR;
+            else
+                error = NET_OPER_ERR;
             return FAIL;
+        }
         bytes_read += bytes_read_now;
     }
     return SUCCESS;
@@ -275,10 +269,18 @@ OPSTAT NET_recv_from(char* bytes, size_t cnt) {
             bytes_read_now = recvfrom(sock, bytes + bytes_read, cnt - bytes_read, 0,
                                       (struct sockaddr*) &peer_addr, &peer_addr_len);
         } while ((bytes_read_now == -1) && (errno == EINTR));
-        if (bytes_read_now == -1 
-            || !NET_getnameinfo((struct sockaddr *) &peer_addr, &peer_addr_len, 
-                                host, NI_MAXHOST, serv, NI_MAXSERV))
+        if (bytes_read_now == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                error = NET_TIMEOUT_ERR;
+            else
+                error = NET_OPER_ERR;
             return FAIL;
+        }
+        if (!NET_getnameinfo((struct sockaddr *) &peer_addr, &peer_addr_len, 
+                                host, NI_MAXHOST, serv, NI_MAXSERV)) {
+            error = NET_OPER_ERR;
+            return FAIL;
+        }
         if (peer_info == NULL)
             PEER_INFO_init(host, serv);
         else if (!PEER_INFO_verify(host, serv))
@@ -300,8 +302,10 @@ OPSTAT NET_send_to(char* bytes, size_t cnt) {
                                       (struct sockaddr*) &peer_info->peer_addr, 
                                       peer_info->peer_addr_len);
         } while ((bytes_sent_now == -1) && (errno == EINTR));
-        if (bytes_sent_now == -1)
+        if (bytes_sent_now == -1) {
+            error = NET_OPER_ERR;
             return FAIL;
+        }
         bytes_sent += bytes_sent_now;
     }
     return SUCCESS;
@@ -459,6 +463,12 @@ void CTX_print() {
         case NET_BIND_ERR:
             printf("Failed to bind");
             break;
+        case NET_OPER_ERR: 
+            printf("Failed to execute network operation");
+            break;
+        case NET_TIMEOUT_ERR: 
+            printf("Timeout for operation exceeded");
+            break;
         case NET_ACCPT_ERR: 
             printf("Failed to accept");
             break;
@@ -470,12 +480,6 @@ void CTX_print() {
             break;
         case PCKT_SAVE_ERR:
             printf("Failed to save packet window");
-            break;
-        case PCKT_SEND_ERR:
-            printf("Failed to send packet window");
-            break;
-        case PCKT_RECV_ERR:
-            printf("Failed to receive packet window");
             break;
         case APP_NUM_ARGS_ERR:
             printf("Wrong number of arguments");
