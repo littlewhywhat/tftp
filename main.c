@@ -77,8 +77,22 @@ OPSTAT PCKT_send();
 
 /* NET */
 
-FILE* net = NULL;
 int sock = -1;
+
+/* for server needs */
+typedef struct peer_info {
+    /* initialised on first successful receive */
+    char host[NI_MAXHOST];
+    char serv[NI_MAXSERV];
+    /* updated after each receive and checked with host, serv */
+    struct sockaddr_storage peer_addr;
+    socklen_t peer_addr_len;
+} PEER_INFO;
+
+PEER_INFO* peer_info = NULL;
+
+void PEER_INFO_init(char const* host, char const* serv);
+OPSTAT PEER_INFO_verify(char const* host, char const* serv);
 
 OPSTAT NET_put_tries(struct addrinfo** tries, char const* host, char const* port);
 OPSTAT NET_getnameinfo(struct sockaddr const* addr, socklen_t const* len,
@@ -86,10 +100,11 @@ OPSTAT NET_getnameinfo(struct sockaddr const* addr, socklen_t const* len,
 
 OPSTAT NET_connect(char const* host, char const* port);
 OPSTAT NET_bind(char const* port);
-OPSTAT NET_accept();
 
 OPSTAT NET_send_bytes(char* bytes, size_t cnt);
 OPSTAT NET_recv_bytes(char* bytes, size_t cnt);
+OPSTAT NET_recv_from(char* bytes, size_t cnt);
+OPSTAT NET_send_to(char* bytes, size_t cnt);
 
 void NET_clean();
 
@@ -188,15 +203,6 @@ OPSTAT PCKT_save() {
     return SUCCESS;
 }
 
-// OPSTAT NET_bind(char const* port) {
-//     net = fopen("bin/net", "r");
-//     if (!net) {
-//         error = NET_BIND_ERR;
-//         return FAIL;
-//     }
-//     return SUCCESS;
-// }
-
 OPSTAT NET_send_packet(PCKT const* packet) {
     if (!NET_send_bytes((char*)packet, sizeof(*packet))) {
         error = NET_CONN_ERR;
@@ -206,7 +212,7 @@ OPSTAT NET_send_packet(PCKT const* packet) {
 }
 
 OPSTAT NET_recv_packet(PCKT* packet) {
-    if (!NET_recv_bytes((char*)packet, sizeof(*packet))) {
+    if (!NET_recv_from((char*)packet, sizeof(*packet))) {
         error = NET_CONN_ERR;
         return FAIL;        
     }
@@ -215,18 +221,18 @@ OPSTAT NET_recv_packet(PCKT* packet) {
 }
 
 OPSTAT NET_recv_ack(int* packet_id) {
-    // if (!fread(packet_id, sizeof(*packet_id), 1, net)) {
-    //     error = NET_CONN_ERR;
-    //     return FAIL;
-    // }
-    return RND_opt_stat();
+    if (!NET_recv_bytes((char*)packet_id, sizeof(*packet_id))) {
+        error = NET_CONN_ERR;
+        return FAIL;
+    }
+    return SUCCESS;
 }
 
 OPSTAT NET_send_ack(int packet_id) {
-    // if (!fwrite(&packet_id, sizeof(packet_id), 1, net)) {
-    //     error = NET_CONN_ERR;
-    //     return FAIL;        
-    // }
+    if (!NET_send_to((char*)&packet_id, sizeof(packet_id))) {
+        error = NET_CONN_ERR;
+        return FAIL;
+    }
     return SUCCESS;
 }
 
@@ -252,6 +258,49 @@ OPSTAT NET_recv_bytes(char* bytes, size_t cnt) {
         if (bytes_read_now == -1)
             return FAIL;
         bytes_read += bytes_read_now;
+    }
+    return SUCCESS;
+}
+
+OPSTAT NET_recv_from(char* bytes, size_t cnt) {
+    struct sockaddr_storage peer_addr;
+    socklen_t peer_addr_len = sizeof(peer_addr);
+    char host[NI_MAXHOST], serv[NI_MAXSERV];
+
+    size_t bytes_read = 0, bytes_read_now;
+    while (bytes_read != cnt) {
+        do {
+            bytes_read_now = recvfrom(sock, bytes + bytes_read, cnt - bytes_read, 0,
+                                      (struct sockaddr*) &peer_addr, &peer_addr_len);
+        } while ((bytes_read_now == -1) && (errno == EINTR));
+        if (bytes_read_now == -1 
+            || !NET_getnameinfo((struct sockaddr *) &peer_addr, &peer_addr_len, 
+                                host, NI_MAXHOST, serv, NI_MAXSERV))
+            return FAIL;
+        if (peer_info == NULL)
+            PEER_INFO_init(host, serv);
+        else if (!PEER_INFO_verify(host, serv))
+            return FAIL;
+        bytes_read += bytes_read_now;
+    }
+    memcpy(&peer_info->peer_addr, &peer_addr, sizeof(peer_addr));
+    memcpy(&peer_info->peer_addr_len, &peer_addr_len, sizeof(peer_addr_len));
+    return SUCCESS;
+}
+
+OPSTAT NET_send_to(char* bytes, size_t cnt) {
+    if (!peer_info)
+        return FAIL;
+    size_t bytes_sent = 0, bytes_sent_now;
+    while (bytes_sent != cnt) {
+        do {
+            bytes_sent_now = sendto(sock, bytes + bytes_sent, cnt - bytes_sent, 0,
+                                      (struct sockaddr*) &peer_info->peer_addr, 
+                                      peer_info->peer_addr_len);
+        } while ((bytes_sent_now == -1) && (errno == EINTR));
+        if (bytes_sent_now == -1)
+            return FAIL;
+        bytes_sent += bytes_sent_now;
     }
     return SUCCESS;
 }
@@ -300,33 +349,6 @@ OPSTAT NET_connect(char const* host, char const* port) {
     printf("Connected to %s\n", host_info);
     freeaddrinfo(tries);
 
-    RND_init();
-    net = fopen("bin/net", "w");
-    if (!net) {
-        error = NET_CONN_ERR;
-        return FAIL;        
-    }
-    return SUCCESS;
-}
-
-OPSTAT NET_accept() {
-    int backlog = 3;
-    
-    if (listen(sock, backlog) == -1) {
-        error = NET_ACCPT_ERR;
-        return FAIL;
-    }
-    struct sockaddr client;
-    socklen_t size = sizeof(client);
-
-    sock = accept(sock, &client, &size);
-    
-    char host[NI_MAXHOST], serv[NI_MAXSERV];
-    
-    if (sock == -1 || !NET_getnameinfo(&client, &size, host, sizeof(host), serv, sizeof(serv))) {
-        return FAIL;
-    }
-    printf("Server: connect from host %s, port %s.\n", host, serv);
     return SUCCESS;
 }
 
@@ -357,11 +379,27 @@ OPSTAT NET_bind(char const* port) {
 }
 
 void NET_clean() {
-    if (net) {
-        fclose(net);
-        net = NULL;
+    if (peer_info) {
+        free(peer_info);
+        peer_info = NULL;
     }
-    close(sock);
+    if (sock != -1)
+        close(sock);
+}
+
+void PEER_INFO_init(char const* host, char const* serv) {
+    peer_info = malloc(sizeof(PEER_INFO));
+    strcpy(peer_info->host, host);
+    strcpy(peer_info->serv, serv);
+}
+
+OPSTAT PEER_INFO_verify(char const* host, char const* serv) {
+    if (!peer_info)
+        return FAIL;
+    if (strcmp(peer_info->host, host) != 0
+        || strcmp(peer_info->serv, serv) != 0)
+        return FAIL;
+    return SUCCESS;
 }
 
 OPSTAT FILE_open(char const* filename, char const* mode) {
@@ -449,6 +487,10 @@ int main(int argc, char* argv[]) {
                 while (PCKT_recv()
                        && PCKT_save()) {
                     pckt_window_cnt++;
+                }
+                if (peer_info) {
+                    printf("Host: %s\n", peer_info->host);
+                    printf("Service: %s\n", peer_info->serv);
                 }
                 break;
             default:
