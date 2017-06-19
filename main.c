@@ -32,6 +32,11 @@ OPSTAT RND_opt_stat() {
     return rand() % 2;
 }
 
+int RND_int_in(int from, int to) {
+    int num_opts = to - from + 1;
+    return (rand() % num_opts) + to;
+}
+
 /* ERR */
 
 typedef enum error_e {
@@ -166,7 +171,8 @@ OPSTAT PCKT_load() {
 OPSTAT PCKT_send() {
     int ack_id;
     while (NET_send_packet(&pckt_buff)
-             && !(NET_recv_ack(&ack_id) && ack_id == pckt_buff.id));
+             && NET_recv_ack(&ack_id) 
+             && ack_id != pckt_buff.id);
     if (error == NET_CONN_ERR) {
         error = PCKT_SEND_ERR;
         return FAIL;
@@ -220,6 +226,7 @@ OPSTAT NET_recv_ack(int* packet_id) {
         error = NET_CONN_ERR;
         return FAIL;
     }
+    *packet_id = RND_int_in(0, *packet_id);
     return SUCCESS;
 }
 
@@ -373,6 +380,16 @@ OPSTAT NET_bind(char const* port) {
     return SUCCESS;
 }
 
+OPSTAT NET_config() {
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;  // not initialising this can cause strange errors
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, 
+                   (char const*)&tv, sizeof(tv)) == -1)
+        return FAIL;
+    return SUCCESS;
+}
+
 void NET_clean() {
     if (peer_info) {
         free(peer_info);
@@ -416,9 +433,11 @@ void FILE_clean() {
 OPSTAT CTX_init(int argc, char* argv[]) {
     switch (argc) {
         case NUM_CLT_ARGS:
+            RND_init();
             app_mode = CLT_MODE;
             return FILE_open(argv[CLT_ARG_FILE], "r") 
-                   && NET_connect(argv[CLT_ARG_HOST], argv[CLT_ARG_PORT]);
+                   && NET_connect(argv[CLT_ARG_HOST], argv[CLT_ARG_PORT])
+                   && NET_config();
         case NUM_SRV_ARGS:
             app_mode = SRV_MODE;
             return FILE_open(argv[SRV_ARG_FILE], "w")
