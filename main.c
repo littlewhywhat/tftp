@@ -70,7 +70,7 @@ void FILE_clean();
 
 /* Packet buffer to hold currently processing data */
 
-#define MAX_DATA_SIZE 2
+#define MAX_DATA_SIZE 2500
 
 typedef struct packet_s {
     int id;
@@ -212,12 +212,12 @@ OPSTAT PCKT_save() {
 }
 
 OPSTAT NET_send_packet(PCKT const* packet) {
-    return !NET_send_bytes((char*)packet, sizeof(*packet));
+    return NET_send_bytes((char*)packet, sizeof(*packet));
 }
 
 OPSTAT NET_recv_packet(PCKT* packet) {
     OPSTAT stat = NET_recv_from((char*)packet, sizeof(*packet));
-    PCKT_print(packet);
+    //PCKT_print(packet);
     return stat;
 }
 
@@ -452,7 +452,8 @@ OPSTAT CTX_init(int argc, char* argv[]) {
         case NUM_SRV_ARGS:
             app_mode = SRV_MODE;
             return FILE_open(argv[SRV_ARG_FILE], "w")
-                   && NET_bind(argv[SRV_ARG_PORT]);
+                   && NET_bind(argv[SRV_ARG_PORT])
+                   && NET_config();
         default: 
             error = APP_NUM_ARGS_ERR;
             return FAIL;
@@ -486,7 +487,7 @@ void CTX_print() {
             printf("Failed to save packet window");
             break;
         case APP_NUM_ARGS_ERR:
-            printf("Wrong number of arguments");
+            printf("Wrong number of arguments. Usage: ./bin/main [host] port filename");
             break;
     }
     printf("\n");
