@@ -1,3 +1,11 @@
+/*
+ *  author Roman Vaivod @vaivorom
+ *
+ *  Application inspired by TFTP protocol to transfer files
+ *  from server to client using UDP protocol through BSD sockets
+ *
+ */
+
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -22,7 +30,7 @@ typedef enum opstat_e {
     SUCCESS = 1
 } OPSTAT;
 
-/* RND */
+/* Random functions to emulate unstable connection */
 
 void RND_init() {
     srand(time(NULL));
@@ -41,7 +49,6 @@ int RND_int_in(int from, int to) {
 
 typedef enum error_e {
     NO_ERR,
-    NET_ACCPT_ERR,
     NET_CONN_ERR,
     NET_BIND_ERR,
     NET_OPER_ERR,
@@ -54,14 +61,14 @@ typedef enum error_e {
 
 ERR error = NO_ERR;
 
-/* FILE */
+/* File to read/write data from/to with some methods */
 
 FILE* file = NULL;
 
 OPSTAT FILE_open(char const* filename, char const* mode);
 void FILE_clean();
 
-/* PCKT */
+/* Packet buffer to hold currently processing data */
 
 #define MAX_DATA_SIZE 2
 
@@ -468,9 +475,6 @@ void CTX_print() {
             break;
         case NET_TIMEOUT_ERR: 
             printf("Timeout for operation exceeded");
-            break;
-        case NET_ACCPT_ERR: 
-            printf("Failed to accept");
             break;
         case FILE_OPEN_ERR:
             printf("Failed to open file");
