@@ -116,8 +116,6 @@ OPSTAT NET_send_ack(int packet_id);
 
 /* CTX */
 
-int pckt_window_cnt = 0;
-
 OPSTAT CTX_init(int argc, char* argv[]);
 void CTX_print();
 void CTX_clean();
@@ -479,15 +477,11 @@ int main(int argc, char* argv[]) {
         switch (app_mode) {
             case CLT_MODE:
                 while (PCKT_load()
-                       && PCKT_send()) {
-                    pckt_window_cnt++;
-                }
+                       && PCKT_send());
                 break;
             case SRV_MODE:
                 while (PCKT_recv()
-                       && PCKT_save()) {
-                    pckt_window_cnt++;
-                }
+                       && PCKT_save());
                 if (peer_info) {
                     printf("Host: %s\n", peer_info->host);
                     printf("Service: %s\n", peer_info->serv);
@@ -497,7 +491,7 @@ int main(int argc, char* argv[]) {
                 assert(0);
                 break;
         }
-        printf("Processed %d packet windows\n", pckt_window_cnt);
+        printf("Processed %d packets\n", pckt_cnt);
     }
     CTX_print();
     CTX_clean();
