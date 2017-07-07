@@ -1,5 +1,5 @@
 /*
- *  author Roman Vaivod @vaivorom
+ *  author Roman Vaivod @littlewhywhat
  *
  *  Application inspired by TFTP protocol to transfer files
  *  from server to client using UDP protocol through BSD sockets
