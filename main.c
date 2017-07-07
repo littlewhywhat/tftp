@@ -93,10 +93,16 @@ int sock = -1;
 
 /* for server needs */
 typedef struct peer_info {
-    /* initialised on first successful receive */
+    /* 
+     * initialised on first successful receive
+     * verified with values from recvfrom
+     */
     char host[NI_MAXHOST];
     char serv[NI_MAXSERV];
-    /* updated after each receive and checked with host, serv */
+    /* 
+     * updated after each successful receive
+     * used as address to send acks back to client
+     */
     struct sockaddr_storage peer_addr;
     socklen_t peer_addr_len;
 } PEER_INFO;
@@ -104,7 +110,8 @@ typedef struct peer_info {
 PEER_INFO* peer_info = NULL;
 
 void PEER_INFO_init(char const* host, char const* serv);
-OPSTAT PEER_INFO_verify(char const* host, char const* serv);
+OPSTAT PEER_INFO_verify(struct sockaddr_storage* peer_addr, socklen_t* len);
+void PEER_INFO_update(struct sockaddr_storage* peer_addr, socklen_t* len); 
 
 OPSTAT NET_put_tries(struct addrinfo** tries, char const* host, char const* port);
 OPSTAT NET_getnameinfo(struct sockaddr const* addr, socklen_t const* len,
@@ -268,7 +275,6 @@ OPSTAT NET_recv_bytes(char* bytes, size_t cnt) {
 OPSTAT NET_recv_from(char* bytes, size_t cnt) {
     struct sockaddr_storage peer_addr;
     socklen_t peer_addr_len = sizeof(peer_addr);
-    char host[NI_MAXHOST], serv[NI_MAXSERV];
 
     size_t bytes_read = 0, bytes_read_now;
     while (bytes_read != cnt) {
@@ -283,19 +289,11 @@ OPSTAT NET_recv_from(char* bytes, size_t cnt) {
                 error = NET_OPER_ERR;
             return FAIL;
         }
-        if (!NET_getnameinfo((struct sockaddr *) &peer_addr, &peer_addr_len, 
-                                host, NI_MAXHOST, serv, NI_MAXSERV)) {
-            error = NET_OPER_ERR;
-            return FAIL;
-        }
-        if (peer_info == NULL)
-            PEER_INFO_init(host, serv);
-        else if (!PEER_INFO_verify(host, serv))
+        if (!PEER_INFO_verify(&peer_addr, &peer_addr_len))
             return FAIL;
         bytes_read += bytes_read_now;
     }
-    memcpy(&peer_info->peer_addr, &peer_addr, sizeof(peer_addr));
-    memcpy(&peer_info->peer_addr_len, &peer_addr_len, sizeof(peer_addr_len));
+    PEER_INFO_update(&peer_addr, &peer_addr_len);
     return SUCCESS;
 }
 
@@ -416,13 +414,24 @@ void PEER_INFO_init(char const* host, char const* serv) {
     strcpy(peer_info->serv, serv);
 }
 
-OPSTAT PEER_INFO_verify(char const* host, char const* serv) {
-    if (!peer_info)
+OPSTAT PEER_INFO_verify(struct sockaddr_storage* peer_addr, socklen_t* len) {
+    char host[NI_MAXHOST], serv[NI_MAXSERV];
+    if (!NET_getnameinfo((struct sockaddr *) peer_addr, len, 
+                                host, NI_MAXHOST, serv, NI_MAXSERV)) {
+        error = NET_OPER_ERR;
         return FAIL;
-    if (strcmp(peer_info->host, host) != 0
-        || strcmp(peer_info->serv, serv) != 0)
+    }
+    if (peer_info == NULL)
+        PEER_INFO_init(host, serv);
+    else if (strcmp(peer_info->host, host) != 0
+             || strcmp(peer_info->serv, serv) != 0)
         return FAIL;
     return SUCCESS;
+}
+
+void PEER_INFO_update(struct sockaddr_storage* peer_addr, socklen_t* len) {
+    memcpy(&peer_info->peer_addr, peer_addr, sizeof(*peer_addr));
+    memcpy(&peer_info->peer_addr_len, len, sizeof(*len));
 }
 
 OPSTAT FILE_open(char const* filename, char const* mode) {
