@@ -1,13 +1,13 @@
-More Trivial File Transfer Protocol
+Simplified Trivial File Transfer Protocol
 ===============
 
 C implementation of client-server file transfer
 using BSD sockets through UDP protocol on IPv4/v6 and inspired by TFTP protocol 
 for packet management.
 
-Implementation is more trivial because it doesn't include write/read request message from client to server. 
+Implementation is simplified because it doesn't include write/read request message from client to server. 
 
-Client always writes and server reads. One file can be sent during "session" and so it's necessary to run client, server again to send another file.
+Here client always writes and server reads. One file can be sent during "session" and so it's necessary to run client, server again to send another file.
 
 ## Behaviour
 
