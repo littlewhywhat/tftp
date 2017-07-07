@@ -10,13 +10,21 @@ EXEC_CMD_SRV=./$(EXEC) $(PORT) $(FILE_SRV)
 
 compile: $(BIN)
 	gcc -g -Wall -pedantic $(MAIN).c -o $(BIN)/$(MAIN)
-run:
-	$(EXEC_CMD_SRV) ; $(EXEC_CMD_CLT) ; diff $(FILE_CLT) $(FILE_SRV)
+run_srv:
+	$(EXEC_CMD_SRV)
+run_clt: create_file
+	$(EXEC_CMD_CLT)
+create_file:
+	cp $(EXEC) $(FILE_CLT)
 valg_srv:
 	valgrind $(EXEC_CMD_SRV)
 valg_clt:
 	valgrind $(EXEC_CMD_CLT)
+diff:
+	diff $(FILE_CLT) $(FILE_SRV)
 gdb:
 	gdb $(EXEC)
+clean:
+	rm -r -f $(BIN)
 $(BIN):
 	mkdir $(BIN)
